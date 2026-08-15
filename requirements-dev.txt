@@ -1,0 +1,8 @@
+fastapi==0.116.1
+httpx==0.28.1
+huggingface-hub==0.34.4
+mcp==1.29.0
+pytest==8.4.1
+PyYAML==6.0.2
+ruff==0.12.9
+uvicorn==0.35.0

@@ -1,0 +1,5 @@
+services:
+  llama-cpp:
+    # Requires Docker Compose 2.30+ and NVIDIA Container Toolkit.
+    gpus: all
+

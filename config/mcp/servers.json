@@ -1,0 +1,125 @@
+{
+  "version": 1,
+  "source": "internet.sh + mcp_setup.sh",
+  "servers": [
+    {
+      "name": "duckduckgo",
+      "category": "general",
+      "transport": "streamable-http",
+      "url": "http://mcp-tools:8000/mcp",
+      "port": 8000,
+      "runtime": {
+        "mode": "direct",
+        "command": [
+          "duckduckgo-mcp-server",
+          "--transport",
+          "streamable-http",
+          "--host",
+          "0.0.0.0",
+          "--port",
+          "8000"
+        ]
+      }
+    },
+    {
+      "name": "sequential-thinking",
+      "category": "general",
+      "transport": "streamable-http",
+      "source_transport": "stdio",
+      "url": "http://mcp-tools:8003/mcp",
+      "port": 8003,
+      "runtime": {
+        "mode": "supergateway",
+        "command": ["mcp-server-sequential-thinking"]
+      }
+    },
+    {
+      "name": "fetch",
+      "category": "general",
+      "transport": "streamable-http",
+      "source_transport": "stdio",
+      "url": "http://mcp-tools:8004/mcp",
+      "port": 8004,
+      "runtime": {
+        "mode": "supergateway",
+        "command": ["mcp-server-fetch"]
+      }
+    },
+    {
+      "name": "time",
+      "category": "general",
+      "transport": "streamable-http",
+      "source_transport": "stdio",
+      "url": "http://mcp-tools:8005/mcp",
+      "port": 8005,
+      "runtime": {
+        "mode": "supergateway",
+        "command": ["mcp-server-time", "--local-timezone=${MCP_TIMEZONE}"]
+      }
+    },
+    {
+      "name": "sqlite",
+      "category": "general",
+      "transport": "streamable-http",
+      "source_transport": "stdio",
+      "url": "http://mcp-tools:8006/mcp",
+      "port": 8006,
+      "runtime": {
+        "mode": "supergateway",
+        "command": ["mcp-server-sqlite", "--db-path", "${MCP_RUNTIME_DIR}/data/test.db"]
+      }
+    },
+    {
+      "name": "context7",
+      "category": "general",
+      "transport": "streamable-http",
+      "source_transport": "stdio",
+      "url": "http://mcp-tools:8007/mcp",
+      "port": 8007,
+      "runtime": {
+        "mode": "supergateway",
+        "command": ["context7-mcp"]
+      }
+    },
+    {
+      "name": "playwright",
+      "category": "general",
+      "transport": "streamable-http",
+      "source_transport": "stdio",
+      "url": "http://mcp-tools:8931/mcp",
+      "port": 8931,
+      "runtime": {
+        "mode": "supergateway",
+        "command": [
+          "playwright-mcp",
+          "--headless",
+          "--browser",
+          "chromium",
+          "--no-sandbox",
+          "--user-data-dir",
+          "${MCP_RUNTIME_DIR}/playwright-profile",
+          "--output-dir",
+          "${MCP_RUNTIME_DIR}/playwright-output"
+        ]
+      }
+    },
+    {
+      "name": "chroma-memory",
+      "category": "memory",
+      "transport": "streamable-http",
+      "source_transport": "stdio",
+      "url": "http://memory-mcp:8011/mcp",
+      "port": 8011,
+      "runtime": {
+        "mode": "separate-service",
+        "service": "memory-mcp"
+      },
+      "storage": {
+        "service": "chroma",
+        "url": "http://chroma:8000",
+        "host_path": "data/memory/chroma"
+      }
+    }
+  ]
+}
+

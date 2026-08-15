@@ -1,0 +1,226 @@
+name: ${COMPOSE_PROJECT_NAME:-local-llm}
+
+services:
+  llama-cpp:
+    build:
+      context: .
+      dockerfile: services/llama-cpp/Dockerfile
+      args:
+        LLAMA_CPP_BASE_IMAGE: ${LLAMA_CPP_BASE_IMAGE:-ghcr.io/ggml-org/llama.cpp:server-cuda-b10362}
+    image: local/llama-cpp-launcher:b10362
+    restart: unless-stopped
+    user: ${HOST_UID:-1000}:${HOST_GID:-1000}
+    environment:
+      LLAMA_HOST: ${LLAMA_HOST:-0.0.0.0}
+      LLAMA_INTERNAL_PORT: "8080"
+      LLAMA_CONTEXT_SIZE: ${LLAMA_CONTEXT_SIZE:-32768}
+      LLAMA_GPU_LAYERS: ${LLAMA_GPU_LAYERS:-auto}
+      LLAMA_THREADS: ${LLAMA_THREADS:-}
+      LLAMA_BATCH_SIZE: ${LLAMA_BATCH_SIZE:-512}
+      LLAMA_UBATCH_SIZE: ${LLAMA_UBATCH_SIZE:-256}
+      LLAMA_FLASH_ATTN: ${LLAMA_FLASH_ATTN:-on}
+      LLAMA_JINJA: ${LLAMA_JINJA:-true}
+      LLAMA_PARALLEL: ${LLAMA_PARALLEL:-1}
+      LLAMA_MODEL_ALIAS: ${LLAMA_MODEL_ALIAS:-local-model}
+      LLAMA_EXTRA_ARGS: ${LLAMA_EXTRA_ARGS:-}
+      CUDA_CACHE_PATH: /tmp/cuda-cache
+    volumes:
+      - ${MODELS_DIR:-./data/models}:/models:ro
+      - ./data/state:/state
+    ports:
+      - 127.0.0.1:${LLAMA_PORT:-8080}:8080
+    networks: [llm-network]
+    read_only: true
+    tmpfs:
+      - /tmp:size=1g
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/llama-healthcheck"]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 20s
+
+  model-manager:
+    build:
+      context: .
+      dockerfile: services/model-manager/Dockerfile
+    image: local/model-manager:0.1.0
+    restart: unless-stopped
+    user: ${HOST_UID:-1000}:${HOST_GID:-1000}
+    command: ["model-manager", "daemon"]
+    environment:
+      MODELS_ROOT: /models
+      STATE_ROOT: /state
+      HF_HOME: /state/huggingface
+      HF_TOKEN: ${HF_TOKEN:-}
+      DEFAULT_GGUF_PATTERN: ${DEFAULT_GGUF_PATTERN:-*Q4_K_M*.gguf}
+      ARIA2_CONNECTIONS: ${ARIA2_CONNECTIONS:-8}
+      ARIA2_RETRIES: ${ARIA2_RETRIES:-10}
+      ARIA2_TIMEOUT: ${ARIA2_TIMEOUT:-60}
+      ARIA2_MIN_SPLIT_SIZE: ${ARIA2_MIN_SPLIT_SIZE:-16M}
+      BOOTSTRAP_MODEL_REPO: ${BOOTSTRAP_MODEL_REPO:-}
+      BOOTSTRAP_MODEL_PATTERN: ${BOOTSTRAP_MODEL_PATTERN:-}
+    volumes:
+      - ${MODELS_DIR:-./data/models}:/models
+      - ./data/state:/state
+    networks: [llm-network]
+    healthcheck:
+      test: ["CMD", "model-manager", "health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  anythingllm:
+    image: ${ANYTHINGLLM_IMAGE:-mintplexlabs/anythingllm:1.15.0}
+    restart: unless-stopped
+    depends_on:
+      llama-cpp:
+        condition: service_healthy
+    environment:
+      SERVER_PORT: "3001"
+      STORAGE_DIR: /app/server/storage
+      UID: ${ANYTHINGLLM_UID:-1000}
+      GID: ${ANYTHINGLLM_GID:-1000}
+      DISABLE_TELEMETRY: ${ANYTHINGLLM_DISABLE_TELEMETRY:-true}
+      LLM_PROVIDER: generic-openai
+      GENERIC_OPEN_AI_BASE_PATH: http://llama-cpp:8080/v1
+      GENERIC_OPEN_AI_MODEL_PREF: ${ANYTHINGLLM_MODEL_PREF:-local-model}
+      GENERIC_OPEN_AI_MODEL_TOKEN_LIMIT: ${LLAMA_CONTEXT_SIZE:-32768}
+      GENERIC_OPEN_AI_API_KEY: local-no-key-required
+    volumes:
+      - ./data/anythingllm:/app/server/storage
+      - ./config/mcp/anythingllm_mcp_servers.json:/app/server/storage/plugins/anythingllm_mcp_servers.json
+    ports:
+      - 127.0.0.1:${ANYTHINGLLM_PORT:-3001}:3001
+    networks: [llm-network]
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://localhost:3001/api/ping').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 45s
+
+  agent-api:
+    build:
+      context: .
+      dockerfile: services/agent/Dockerfile
+    image: local/agent-api:0.1.0
+    restart: unless-stopped
+    depends_on:
+      llama-cpp:
+        condition: service_healthy
+      mcp-tools:
+        condition: service_started
+      memory-mcp:
+        condition: service_started
+    environment:
+      LLAMA_BASE_URL: http://llama-cpp:8080/v1
+      LLAMA_MODEL_ALIAS: ${LLAMA_MODEL_ALIAS:-local-model}
+      MODELS_ROOT: /models
+      STATE_ROOT: /state
+      MCP_CONFIG_PATH: /config/mcp/servers.json
+      AGENT_LOG_LEVEL: ${AGENT_LOG_LEVEL:-INFO}
+      AGENT_REQUEST_TIMEOUT: ${AGENT_REQUEST_TIMEOUT:-600}
+    volumes:
+      - ${MODELS_DIR:-./data/models}:/models:ro
+      - ./data/state:/state:ro
+      - ./config/mcp:/config/mcp:ro
+    ports:
+      - 127.0.0.1:${AGENT_PORT:-8000}:8000
+    networks: [llm-network]
+    read_only: true
+    tmpfs:
+      - /tmp:size=128m
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  mcp-tools:
+    build:
+      context: .
+      dockerfile: services/mcp-tools/Dockerfile
+    image: local/mcp-tools:0.1.0
+    restart: unless-stopped
+    environment:
+      MCP_CONFIG_PATH: /config/servers.json
+      MCP_TIMEZONE: ${MCP_TIMEZONE:-Asia/Kolkata}
+      MCP_CORS_ORIGIN: ${MCP_CORS_ORIGIN:-http://localhost:3001}
+      MCP_RESTART_DELAY: ${MCP_RESTART_DELAY:-5}
+      MCP_RUNTIME_DIR: /runtime
+      HOME: /runtime/home
+      PLAYWRIGHT_BROWSERS_PATH: /ms-playwright
+    volumes:
+      - ./config/mcp/servers.json:/config/servers.json:ro
+    networks: [llm-network]
+    read_only: true
+    tmpfs:
+      - /runtime:size=1g,exec
+      - /tmp:size=512m,exec
+    shm_size: 1gb
+    healthcheck:
+      test: ["CMD", "python", "/app/healthcheck.py"]
+      interval: 20s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+
+  chroma:
+    build:
+      context: .
+      dockerfile: services/chroma/Dockerfile
+      args:
+        CHROMA_BASE_IMAGE: ${CHROMA_IMAGE:-chromadb/chroma:1.5.3}
+    image: local/chroma:1.5.3
+    restart: unless-stopped
+    environment:
+      ANONYMIZED_TELEMETRY: "FALSE"
+    volumes:
+      - ./data/memory/chroma:/data
+    networks: [llm-network]
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/api/v2/heartbeat"]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 20s
+
+  memory-mcp:
+    build:
+      context: .
+      dockerfile: services/memory-mcp/Dockerfile
+    image: local/memory-mcp:0.1.0
+    restart: unless-stopped
+    depends_on:
+      chroma:
+        condition: service_healthy
+    environment:
+      CHROMA_HOST: ${CHROMA_HOST:-chroma}
+      CHROMA_PORT: ${CHROMA_PORT:-8000}
+      CHROMA_COLLECTION: ${CHROMA_COLLECTION:-agent_memory}
+      MEMORY_MCP_PORT: ${MEMORY_MCP_PORT:-8011}
+      MCP_CORS_ORIGIN: ${MCP_CORS_ORIGIN:-http://localhost:3001}
+      MCP_RESTART_DELAY: ${MCP_RESTART_DELAY:-5}
+      HOME: /home/node
+    networks: [llm-network]
+    read_only: true
+    tmpfs:
+      - /tmp:size=256m,exec
+    healthcheck:
+      test: ["CMD", "python", "/app/healthcheck.py"]
+      interval: 15s
+      timeout: 8s
+      retries: 10
+      start_period: 45s
+
+networks:
+  llm-network:
+    name: ${COMPOSE_PROJECT_NAME:-local-llm}-network
+    driver: bridge

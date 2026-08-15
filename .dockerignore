@@ -1,0 +1,12 @@
+.git
+.env
+.venv
+__pycache__
+.pytest_cache
+data
+dist
+test-results
+*.gguf
+*.partial
+*.aria2
+

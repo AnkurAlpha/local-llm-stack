@@ -1,0 +1,36 @@
+.env
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.env.*
+!.env.example
+*.before-*
+
+# Model weights, partial downloads, and registries
+data/models/**
+!data/models/.gitkeep
+*.gguf
+*.gguf.partial
+*.aria2
+
+# Runtime state and application data
+data/state/**
+!data/state/.gitkeep
+data/anythingllm/**
+!data/anythingllm/plugins/
+!data/anythingllm/plugins/.gitkeep
+data/memory/chroma/**
+!data/memory/chroma/.gitkeep
+data/backups/**
+!data/backups/.gitkeep
+data/mcp/**
+!data/mcp/.gitkeep
+
+# Local reports and packages
+test-results/
+dist/
+*.tar.gz
+*.zip
+

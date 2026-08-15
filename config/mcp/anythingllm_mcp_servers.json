@@ -1,0 +1,36 @@
+{
+  "mcpServers": {
+    "duckduckgo": {
+      "type": "streamable",
+      "url": "http://mcp-tools:8000/mcp"
+    },
+    "sequential-thinking": {
+      "type": "streamable",
+      "url": "http://mcp-tools:8003/mcp"
+    },
+    "fetch": {
+      "type": "streamable",
+      "url": "http://mcp-tools:8004/mcp"
+    },
+    "time": {
+      "type": "streamable",
+      "url": "http://mcp-tools:8005/mcp"
+    },
+    "sqlite": {
+      "type": "streamable",
+      "url": "http://mcp-tools:8006/mcp"
+    },
+    "context7": {
+      "type": "streamable",
+      "url": "http://mcp-tools:8007/mcp"
+    },
+    "playwright": {
+      "type": "streamable",
+      "url": "http://mcp-tools:8931/mcp"
+    },
+    "chroma-memory": {
+      "type": "streamable",
+      "url": "http://memory-mcp:8011/mcp"
+    }
+  }
+}

@@ -1,0 +1,482 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+ENV_FILE="$ROOT/.env"
+ENV_EXAMPLE="$ROOT/.env.example"
+
+die() {
+  echo "ERROR: $*" >&2
+  exit 1
+}
+
+need() {
+  command -v "$1" >/dev/null 2>&1 || die "Required command is missing: $1"
+}
+
+ensure_env() {
+  if [[ ! -f "$ENV_FILE" ]]; then
+    cp "$ENV_EXAMPLE" "$ENV_FILE"
+    echo "Created .env from .env.example. Review it before exposing this stack beyond localhost."
+  fi
+}
+
+env_source() {
+  [[ -f "$ENV_FILE" ]] && printf '%s' "$ENV_FILE" || printf '%s' "$ENV_EXAMPLE"
+}
+
+env_value() {
+  local key="$1" fallback="${2:-}" source value
+  source="$(env_source)"
+  value="$(sed -n -E "s/^${key}=(.*)$/\1/p" "$source" | tail -n 1)"
+  printf '%s' "${value:-$fallback}"
+}
+
+compose_command() {
+  local accelerator
+  accelerator="$(env_value LLAMA_ACCELERATOR cuda)"
+  COMPOSE=(docker compose --project-directory "$ROOT" --env-file "$(env_source)" -f "$ROOT/compose.yml")
+  if [[ "$accelerator" == "cuda" ]]; then
+    COMPOSE+=(-f "$ROOT/compose.cuda.yml")
+  elif [[ "$accelerator" != "cpu" ]]; then
+    die "LLAMA_ACCELERATOR must be 'cuda' or 'cpu', got: $accelerator"
+  fi
+}
+
+dc() {
+  compose_command
+  "${COMPOSE[@]}" "$@"
+}
+
+require_docker() {
+  need docker
+  docker compose version >/dev/null 2>&1 || die "Docker Compose v2 is unavailable. Install the docker-compose plugin."
+  docker info >/dev/null 2>&1 || die "Docker daemon is unavailable or this user lacks access. Start Docker and check docker-group membership."
+}
+
+prepare_runtime() {
+  need python3
+  mkdir -p \
+    "$ROOT/data/models" \
+    "$ROOT/data/state" \
+    "$ROOT/data/anythingllm/plugins" \
+    "$ROOT/data/memory/chroma" \
+    "$ROOT/data/backups"
+  python3 "$ROOT/scripts/generate_mcp_configs.py" >/dev/null
+}
+
+gpu_preflight() {
+  [[ "$(env_value LLAMA_ACCELERATOR cuda)" == "cuda" ]] || return 0
+  command -v nvidia-smi >/dev/null 2>&1 || die \
+    "nvidia-smi is missing. Install the NVIDIA driver, or set LLAMA_ACCELERATOR=cpu."
+  nvidia-smi -L >/dev/null 2>&1 || die "NVIDIA driver/GPU is unavailable. Fix nvidia-smi or set LLAMA_ACCELERATOR=cpu and use the CPU image."
+  local image
+  image="$(env_value GPU_PREFLIGHT_IMAGE nvidia/cuda:12.8.1-base-ubuntu24.04)"
+  if ! docker run --rm --pull=missing --gpus all "$image" nvidia-smi -L >/dev/null 2>&1; then
+    die "Docker cannot access the NVIDIA GPU. Install/configure NVIDIA Container Toolkit, restart Docker, then retry."
+  fi
+}
+
+stack_has_containers() {
+  [[ -n "$(dc ps -aq 2>/dev/null || true)" ]]
+}
+
+check_ports() {
+  stack_has_containers && return 0
+  python3 "$ROOT/scripts/check_ports.py" \
+    "$(env_value ANYTHINGLLM_PORT 3001)" \
+    "$(env_value LLAMA_PORT 8080)" \
+    "$(env_value AGENT_PORT 8000)"
+}
+
+service_running() {
+  [[ -n "$(dc ps --status running -q "$1" 2>/dev/null || true)" ]]
+}
+
+manager() {
+  if service_running model-manager; then
+    dc exec -T model-manager model-manager "$@"
+  else
+    dc run --rm --no-deps model-manager model-manager "$@"
+  fi
+}
+
+json_field() {
+  local path="$1" field="$2" fallback="${3:-}"
+  python3 - "$path" "$field" "$fallback" <<'PY'
+import json, pathlib, sys
+path, field, fallback = pathlib.Path(sys.argv[1]), sys.argv[2], sys.argv[3]
+try:
+    value = json.loads(path.read_text()).get(field, fallback)
+except (OSError, ValueError):
+    value = fallback
+print(value if value is not None else fallback)
+PY
+}
+
+container_state() {
+  local service="$1" cid state health
+  cid="$(dc ps -q "$service" 2>/dev/null || true)"
+  if [[ -z "$cid" ]]; then
+    printf 'STOPPED'
+    return
+  fi
+  state="$(docker inspect -f '{{.State.Status}}' "$cid" 2>/dev/null || echo unknown)"
+  health="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{end}}' "$cid" 2>/dev/null || true)"
+  if [[ "$state" == "running" && -n "$health" ]]; then
+    printf '%s/%s' "${state^^}" "${health^^}"
+  else
+    printf '%s' "${state^^}"
+  fi
+}
+
+models_count() {
+  python3 - "$ROOT/data/state/models.json" <<'PY'
+import json, pathlib, sys
+try:
+    print(len(json.loads(pathlib.Path(sys.argv[1]).read_text()).get("models", [])))
+except (OSError, ValueError):
+    print(0)
+PY
+}
+
+print_row() {
+  printf '%-19s %-22s %s\n' "$1" "$2" "$3"
+}
+
+status() {
+  require_docker
+  prepare_runtime
+  local llama_state llama_model llama_container gpu_state
+  llama_state="$(json_field "$ROOT/data/state/llama-status.json" state UNKNOWN)"
+  llama_model="$(json_field "$ROOT/data/state/llama-status.json" model '')"
+  llama_container="$(container_state llama-cpp)"
+
+  echo
+  print_row "SERVICE" "STATUS" "DETAIL"
+  print_row "AnythingLLM" "$(container_state anythingllm)" "http://localhost:$(env_value ANYTHINGLLM_PORT 3001)"
+  if [[ "$llama_container" == "RUNNING/HEALTHY" && "$llama_state" == "WAITING" ]]; then
+    print_row "llama.cpp" "WAITING" "No model selected"
+  elif [[ "$llama_container" == "RUNNING/HEALTHY" && "$llama_state" == "RUNNING" ]]; then
+    print_row "llama.cpp" "RUNNING" "${llama_model:-unknown} · http://localhost:$(env_value LLAMA_PORT 8080)/v1"
+  else
+    print_row "llama.cpp" "$llama_container" "${llama_state}${llama_model:+ · $llama_model}"
+  fi
+  print_row "Agent API" "$(container_state agent-api)" "http://localhost:$(env_value AGENT_PORT 8000)"
+  print_row "Model Manager" "$(container_state model-manager)" "$(models_count) completed model(s)"
+  print_row "MCP Tools" "$(container_state mcp-tools)" "7 general MCP servers"
+  print_row "Memory MCP" "$(container_state memory-mcp)" "collection=$(env_value CHROMA_COLLECTION agent_memory)"
+  print_row "Chroma" "$(container_state chroma)" "persistent: data/memory/chroma"
+
+  if [[ "$(env_value LLAMA_ACCELERATOR cuda)" == "cuda" ]]; then
+    if command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi -L >/dev/null 2>&1; then
+      gpu_state="NVIDIA available"
+    else
+      gpu_state="NVIDIA unavailable"
+    fi
+  else
+    gpu_state="CPU mode"
+  fi
+  print_row "GPU" "$gpu_state" "accelerator=$(env_value LLAMA_ACCELERATOR cuda)"
+  echo
+}
+
+wait_for_llama() {
+  local timeout port elapsed=0
+  timeout="$(env_value LLAMA_START_TIMEOUT 600)"
+  port="$(env_value LLAMA_PORT 8080)"
+  echo "Waiting up to ${timeout}s for llama.cpp to load the selected model..."
+  while (( elapsed < timeout )); do
+    if python3 - "$port" >/dev/null 2>&1 <<'PY'
+import sys, urllib.request
+urllib.request.urlopen(f"http://127.0.0.1:{sys.argv[1]}/health", timeout=2)
+PY
+    then
+      echo "llama.cpp is ready: http://localhost:${port}/v1"
+      manager current
+      return 0
+    fi
+    sleep 2
+    ((elapsed += 2))
+    if (( elapsed % 20 == 0 )); then
+      echo "Still loading (${elapsed}s elapsed)..."
+    fi
+  done
+  echo "llama.cpp did not become healthy within ${timeout}s." >&2
+  dc logs --tail=120 llama-cpp >&2 || true
+  return 1
+}
+
+mcp_list() {
+  python3 - "$ROOT/config/mcp/servers.json" <<'PY'
+import json, pathlib, sys
+payload = json.loads(pathlib.Path(sys.argv[1]).read_text())
+print(f"{'NAME':<22} {'GROUP':<9} {'TRANSPORT':<18} ENDPOINT")
+for item in payload['servers']:
+    print(f"{item['name']:<22} {item['category']:<9} {item['transport']:<18} {item['url']}")
+PY
+}
+
+mcp_status() {
+  require_docker
+  print_row "MCP Tools" "$(container_state mcp-tools)" ""
+  if service_running mcp-tools; then
+    dc exec -T mcp-tools python /app/healthcheck.py --json --probe-tools || true
+  fi
+  print_row "Memory MCP" "$(container_state memory-mcp)" ""
+  if service_running memory-mcp; then
+    dc exec -T memory-mcp python /app/healthcheck.py --probe-tools || true
+  fi
+  print_row "Chroma" "$(container_state chroma)" "persistent"
+}
+
+memory_status() {
+  require_docker
+  print_row "Memory MCP" "$(container_state memory-mcp)" "http://memory-mcp:$(env_value MEMORY_MCP_PORT 8011)/mcp"
+  print_row "Chroma" "$(container_state chroma)" "data/memory/chroma"
+  if service_running memory-mcp; then
+    dc exec -T memory-mcp python /app/healthcheck.py --probe-tools || true
+  fi
+}
+
+restore_memory_services() {
+  local memory_was_running="$1" chroma_was_running="$2"
+  if [[ "$memory_was_running" == 1 ]]; then
+    dc up -d chroma memory-mcp >/dev/null
+  elif [[ "$chroma_was_running" == 1 ]]; then
+    dc up -d chroma >/dev/null
+  fi
+}
+
+memory_backup() {
+  require_docker
+  prepare_runtime
+  need tar
+  local memory_was_running=0 chroma_was_running=0 timestamp backup
+  service_running memory-mcp && memory_was_running=1
+  service_running chroma && chroma_was_running=1
+  if [[ "$memory_was_running" == 1 || "$chroma_was_running" == 1 ]]; then
+    echo "Stopping memory-mcp and Chroma briefly for a consistent backup..."
+    dc stop memory-mcp chroma >/dev/null
+  fi
+  trap 'restore_memory_services "$memory_was_running" "$chroma_was_running"; exit 130' INT TERM
+  timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
+  backup="$ROOT/data/backups/chroma-${timestamp}.tar.gz"
+  local backup_status=0
+  tar -czf "$backup" -C "$ROOT/data/memory/chroma" . || backup_status=$?
+  trap - INT TERM
+  restore_memory_services "$memory_was_running" "$chroma_was_running"
+  if [[ "$backup_status" -ne 0 ]]; then
+    echo "Backup failed; memory services were restored." >&2
+    return "$backup_status"
+  fi
+  echo "Created: $backup"
+}
+
+memory_import_volume() {
+  [[ $# -eq 1 ]] || die "Usage: ./llmctl memory import-volume VOLUME_NAME"
+  local volume="$1" destination="$ROOT/data/memory/chroma"
+  [[ "$volume" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]] || die "Unsafe Docker volume name"
+  require_docker
+  prepare_runtime
+  docker volume inspect "$volume" >/dev/null 2>&1 || die "Docker volume not found: $volume"
+  if find "$destination" -mindepth 1 -maxdepth 1 ! -name .gitkeep -print -quit | grep -q .; then
+    die "data/memory/chroma is not empty. Refusing to overwrite existing memory."
+  fi
+  local memory_was_running=0 chroma_was_running=0
+  service_running memory-mcp && memory_was_running=1
+  service_running chroma && chroma_was_running=1
+  dc stop memory-mcp chroma >/dev/null 2>&1 || true
+  trap 'restore_memory_services "$memory_was_running" "$chroma_was_running"; exit 130' INT TERM
+  local import_status=0
+  docker run --rm \
+    -v "${volume}:/source:ro" \
+    -v "${destination}:/destination" \
+    alpine:3.22.0 sh -c 'cp -a /source/. /destination/' || import_status=$?
+  trap - INT TERM
+  restore_memory_services "$memory_was_running" "$chroma_was_running"
+  if [[ "$import_status" -ne 0 ]]; then
+    echo "Memory import failed; the source volume was preserved and services were restored." >&2
+    return "$import_status"
+  fi
+  echo "Imported memory without deleting the source volume: $volume"
+  memory_backup
+}
+
+doctor() {
+  ensure_env
+  prepare_runtime
+  echo "Python:         $(python3 --version 2>&1)"
+  if command -v docker >/dev/null 2>&1; then
+    echo "Docker:         $(docker --version 2>&1)"
+    echo "Compose:        $(docker compose version 2>&1)"
+    if docker info >/dev/null 2>&1; then
+      echo "Docker daemon:  accessible"
+    else
+      echo "Docker daemon:  UNAVAILABLE"
+      return 1
+    fi
+  else
+    echo "Docker:         MISSING"
+    return 1
+  fi
+  if [[ "$(env_value LLAMA_ACCELERATOR cuda)" == "cuda" ]]; then
+    gpu_preflight
+    echo "NVIDIA Docker:  accessible"
+  else
+    echo "Accelerator:    CPU"
+  fi
+  python3 "$ROOT/scripts/generate_mcp_configs.py" --check
+}
+
+usage() {
+  cat <<'EOF'
+Usage: ./llmctl COMMAND [ARGS]
+
+Stack:
+  up | down | restart | status | logs [SERVICE] | doctor
+
+Models:
+  download OWNER/REPO [--pattern GLOB] [--revision REV]
+  models
+  inspect MODEL
+  use MODEL
+  current
+  remove MODEL [--yes]
+
+MCP:
+  mcp list | status | logs
+  memory status | logs | backup | import-volume VOLUME_NAME
+
+Utility:
+  shell SERVICE
+EOF
+}
+
+main() {
+  local command="${1:-help}"
+  [[ $# -gt 0 ]] && shift || true
+  case "$command" in
+    up)
+      ensure_env
+      prepare_runtime
+      require_docker
+      gpu_preflight
+      check_ports
+      dc up -d --build
+      status
+      ;;
+    down)
+      require_docker
+      dc down
+      echo "Stack stopped. Model, AnythingLLM, and Chroma data were preserved."
+      ;;
+    restart)
+      require_docker
+      dc restart "$@"
+      status
+      ;;
+    status)
+      status
+      ;;
+    logs)
+      require_docker
+      if [[ $# -gt 0 ]]; then
+        dc logs --tail=200 -f "$@"
+      else
+        dc logs --tail=200 -f
+      fi
+      ;;
+    doctor)
+      doctor
+      ;;
+    download)
+      [[ $# -ge 1 ]] || die "Usage: ./llmctl download OWNER/REPO [--pattern GLOB]"
+      require_docker
+      manager download "$@"
+      ;;
+    models)
+      require_docker
+      manager list
+      ;;
+    inspect)
+      [[ $# -eq 1 ]] || die "Usage: ./llmctl inspect MODEL"
+      require_docker
+      manager inspect "$1"
+      ;;
+    use)
+      [[ $# -eq 1 ]] || die "Usage: ./llmctl use MODEL"
+      require_docker
+      manager use "$1"
+      if service_running llama-cpp; then
+        dc restart llama-cpp >/dev/null
+      else
+        gpu_preflight
+        dc up -d llama-cpp >/dev/null
+      fi
+      wait_for_llama
+      ;;
+    current)
+      require_docker
+      manager current
+      ;;
+    remove)
+      [[ $# -ge 1 ]] || die "Usage: ./llmctl remove MODEL [--yes]"
+      require_docker
+      local model="$1" confirmed=0
+      shift
+      [[ "${1:-}" == "--yes" ]] && confirmed=1
+      if [[ "$confirmed" == 0 ]]; then
+        [[ -t 0 ]] || die "Non-interactive removal requires --yes"
+        read -r -p "Permanently remove model files for '$model'? [y/N] " answer
+        [[ "$answer" =~ ^[Yy]$ ]] || { echo "Cancelled."; return 0; }
+      fi
+      local selected_before selected_after
+      selected_before="$(json_field "$ROOT/data/state/current-model.json" model_id '')"
+      manager remove "$model" --yes
+      selected_after="$(json_field "$ROOT/data/state/current-model.json" model_id '')"
+      if [[ "$selected_before" != "$selected_after" ]] && service_running llama-cpp; then
+        dc restart llama-cpp >/dev/null
+      fi
+      ;;
+    shell)
+      [[ $# -eq 1 ]] || die "Usage: ./llmctl shell SERVICE"
+      require_docker
+      case "$1" in
+        anythingllm|llama-cpp|model-manager|agent-api|mcp-tools|memory-mcp|chroma) ;;
+        *) die "Unknown service: $1" ;;
+      esac
+      dc exec "$1" sh
+      ;;
+    mcp)
+      local subcommand="${1:-status}"
+      [[ $# -gt 0 ]] && shift || true
+      case "$subcommand" in
+        list) mcp_list ;;
+        status) mcp_status ;;
+        logs) require_docker; dc logs --tail=200 -f mcp-tools ;;
+        *) die "Usage: ./llmctl mcp list|status|logs" ;;
+      esac
+      ;;
+    memory)
+      local subcommand="${1:-status}"
+      [[ $# -gt 0 ]] && shift || true
+      case "$subcommand" in
+        status) memory_status ;;
+        logs) require_docker; dc logs --tail=200 -f memory-mcp chroma ;;
+        backup) memory_backup ;;
+        import-volume) memory_import_volume "$@" ;;
+        *) die "Usage: ./llmctl memory status|logs|backup|import-volume VOLUME" ;;
+      esac
+      ;;
+    help|-h|--help)
+      usage
+      ;;
+    *)
+      usage >&2
+      die "Unknown command: $command"
+      ;;
+  esac
+}
+
+main "$@"
