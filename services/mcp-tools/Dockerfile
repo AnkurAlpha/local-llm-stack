@@ -15,6 +15,18 @@ RUN apt-get update \
 COPY services/mcp-tools/requirements.txt /tmp/requirements.txt
 RUN /opt/mcp-venv/bin/pip install --no-cache-dir -r /tmp/requirements.txt
 
+RUN READABILIPY_JS_DIR="$(/opt/mcp-venv/bin/python -c \
+      'from pathlib import Path; import readabilipy; print(Path(readabilipy.__file__).resolve().parent / "javascript")')" \
+    && npm install \
+      --prefix "$READABILIPY_JS_DIR" \
+      --omit=dev \
+      --no-audit \
+      --no-fund \
+    && npm ls \
+      --prefix "$READABILIPY_JS_DIR" \
+      --omit=dev \
+      --depth=0
+
 RUN npm install --global \
       supergateway@3.4.3 \
       @modelcontextprotocol/server-sequential-thinking@2026.7.4 \
