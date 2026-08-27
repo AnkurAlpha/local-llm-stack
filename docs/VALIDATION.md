@@ -1,9 +1,9 @@
 # Validation record
 
-This records checks performed in the authoring environment on 2026-08-10. It separates executed
-results from host-dependent checks that still need a Docker/NVIDIA machine.
+This records checks performed for the V1.0.0 release. Authoring-environment checks were run on
+2026-08-10; live target-host checks were run on 2026-08-27.
 
-## Passed here
+## Passed in the authoring environment
 
 - Ruff formatting and linting across all Python sources.
 - Python bytecode compilation for services, scripts, and tests.
@@ -25,20 +25,29 @@ results from host-dependent checks that still need a Docker/NVIDIA machine.
 - Compose YAML parsing and structural/invariant tests, including service health checks, loopback-only
   public ports, internal Docker DNS endpoints, Chroma persistence, and the CUDA GPU overlay.
 
-## Not executable here
+## Passed on the target CUDA host (2026-08-27)
 
-The authoring environment has no `docker` executable (`docker compose config` exits 127). Therefore
-it could not truthfully execute:
+The following live checks were run on the CUDA-enabled Linux host with the selected model
+`unsloth--Qwen3-8B-GGUF--Qwen3-8B-Q4_K_M.gguf`:
 
-- Docker Compose's own `config` renderer;
-- custom image builds or upstream image pulls;
-- NVIDIA driver/Container Toolkit checks;
-- live llama.cpp loading/inference;
-- AnythingLLM-to-llama.cpp or Agent-API-to-llama.cpp container smoke tests;
-- live MCP protocol checks inside Compose; or
-- Chroma/memory-MCP persistence across container recreation.
+- Agent API health reported `llama_ready: true` and `model_selected: true`.
+- `POST /chat` returned the exact marker `LMCTL_AGENT_API_OK`.
+- `.venv/bin/python -m pytest -q`: 36 passed, 1 deselected, 1 warning.
+- `.venv/bin/ruff check .`: all checks passed.
+- `.venv/bin/ruff format --check .`: 46 files already formatted.
+- `docker compose config --quiet` passed.
+- `git diff --check` passed.
+- `./llmctl status` showed all services healthy and NVIDIA CUDA available.
+- All 7 general MCP servers reported `OK`.
+- Memory MCP and Chroma reported `OK` with persistent storage.
+- AnythingLLM successfully invoked web scraping for `https://example.com` and returned
+  `Example Domain` as the page title.
 
-## Run on the target host
+These results complete the V1 functional and host-side regression validation. The published
+release is [v1.0.0](https://github.com/AnkurAlpha/local-llm-stack/releases/tag/v1.0.0).
+
+
+## Reproduce on another host
 
 ```bash
 cp .env.example .env

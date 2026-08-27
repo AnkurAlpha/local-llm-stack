@@ -1,4 +1,4 @@
-# Local LLM Stack — Prototype V1
+# Local LLM Stack — V1
 
 A local-first, Docker Compose platform with AnythingLLM, one selectable llama.cpp server, safe
 Hugging Face GGUF downloads, a FastAPI orchestration foundation, the MCP servers recovered from
@@ -7,6 +7,22 @@ Hugging Face GGUF downloads, a FastAPI orchestration foundation, the MCP servers
 Prototype V1 serves one selected GGUF model at a time. Model storage, provider interfaces, MCP
 boundaries, and service naming are deliberately structured so later versions can add multiple
 specialized llama.cpp instances without replacing the control plane.
+
+## V1 status
+
+V1.0.0 has been validated on a CUDA-enabled Linux host.
+
+Validated components include:
+
+- AnythingLLM → llama.cpp conversation
+- Agent API `/chat`
+- 36 automated tests (`36 passed, 1 deselected`)
+- 7 general MCP servers and the Chroma memory MCP
+- Real MCP web-scraping invocation through AnythingLLM
+- Persistent Chroma memory service
+- Docker Compose and NVIDIA CUDA operation
+
+Public release: [v1.0.0](https://github.com/AnkurAlpha/local-llm-stack/releases/tag/v1.0.0)
 
 ## Architecture
 
@@ -400,5 +416,5 @@ The opt-in metadata-only Hugging Face test downloads no model weights:
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and
 [docs/MCP_MIGRATION.md](docs/MCP_MIGRATION.md) for extension boundaries and the exact migration from
-the supplied scripts. [docs/VALIDATION.md](docs/VALIDATION.md) records which checks were actually
-executed in the authoring environment and which require the target Docker/NVIDIA host.
+the supplied scripts. [docs/VALIDATION.md](docs/VALIDATION.md) records authoring-environment and
+target-host validation results.
