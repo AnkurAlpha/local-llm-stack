@@ -42,7 +42,7 @@ def test_cuda_overlay_and_internal_service_endpoints() -> None:
     assert cuda == {"services": {"llama-cpp": {"gpus": "all"}}}
     assert compose["services"]["agent-api"]["environment"]["LLAMA_BASE_URL"] == ("http://llama-cpp:8080/v1")
     assert compose["services"]["anythingllm"]["environment"]["GENERIC_OPEN_AI_BASE_PATH"] == (
-        "http://llama-cpp:8080/v1"
+        "${ANYTHINGLLM_BASE_PATH:-http://agent-api:8000/v1}"
     )
     assert compose["services"]["memory-mcp"]["environment"]["CHROMA_HOST"] == ("${CHROMA_HOST:-chroma}")
     for service in ("anythingllm", "llama-cpp", "agent-api"):

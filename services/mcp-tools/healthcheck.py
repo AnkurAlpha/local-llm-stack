@@ -8,6 +8,7 @@ import os
 import socket
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
@@ -16,7 +17,11 @@ from mcp.client.streamable_http import streamablehttp_client
 def load() -> list[dict[str, Any]]:
     path = Path(os.environ.get("MCP_CONFIG_PATH", "/config/servers.json"))
     payload = json.loads(path.read_text(encoding="utf-8"))
-    return [item for item in payload["servers"] if item.get("category") == "general"]
+    return [
+        item
+        for item in payload["servers"]
+        if item.get("category") == "general" and item.get("runtime", {}).get("mode") != "external"
+    ]
 
 
 def reachable(port: int) -> bool:
@@ -25,6 +30,16 @@ def reachable(port: int) -> bool:
             return True
     except OSError:
         return False
+
+
+def server_port(item: dict[str, Any]) -> int:
+    value = item.get("port")
+    if value is not None:
+        return int(value)
+    parsed = urlparse(str(item.get("url", "")))
+    if parsed.port is None:
+        raise ValueError(f"MCP server has no port: {item.get('name', '<unknown>')}")
+    return parsed.port
 
 
 async def probe_tools(port: int) -> tuple[int | None, str | None]:
@@ -45,7 +60,7 @@ async def probe_tools(port: int) -> tuple[int | None, str | None]:
 async def check(probe: bool) -> list[dict[str, Any]]:
     statuses: list[dict[str, Any]] = []
     for item in load():
-        port = int(item["port"])
+        port = server_port(item)
         is_reachable = reachable(port)
         statuses.append(
             {
@@ -85,7 +100,7 @@ def main() -> int:
             if "error" in item:
                 detail = f" error={item['error']}"
             print(f"{item['name']:<22} {item['status']}{detail}")
-    return 0 if statuses and all(item["status"] == "OK" for item in statuses) else 1
+    return 0 if all(item["status"] == "OK" for item in statuses) else 1
 
 
 if __name__ == "__main__":

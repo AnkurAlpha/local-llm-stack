@@ -29,15 +29,18 @@ class LlamaCppProvider(ChatProvider):
 
     async def chat(
         self,
-        messages: list[dict[str, str]],
+        messages: list[dict[str, Any]],
         temperature: float | None = None,
         max_tokens: int | None = None,
+        tools: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         payload: dict[str, Any] = {"model": self.model, "messages": messages, "stream": False}
         if temperature is not None:
             payload["temperature"] = temperature
         if max_tokens is not None:
             payload["max_tokens"] = max_tokens
+        if tools:
+            payload["tools"] = tools
         response = await self.client.post(f"{self.base_url}/chat/completions", json=payload)
         response.raise_for_status()
         return dict(response.json())

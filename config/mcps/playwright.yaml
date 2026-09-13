@@ -1,0 +1,19 @@
+id: playwright
+enabled: true
+endpoint: http://mcp-tools:8931/mcp
+transport: streamable-http
+category_hint: browser
+description: Navigate web pages and interact with a headless Chromium browser.
+runtime:
+  mode: supergateway
+  port: 8931
+  command:
+    - playwright-mcp
+    - --headless
+    - --browser
+    - chromium
+    - --no-sandbox
+    - --user-data-dir
+    - ${MCP_RUNTIME_DIR}/playwright-profile
+    - --output-dir
+    - ${MCP_RUNTIME_DIR}/playwright-output

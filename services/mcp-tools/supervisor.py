@@ -12,6 +12,7 @@ import sys
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 ENV_RE = re.compile(r"\$\{([A-Z][A-Z0-9_]*)\}")
 
@@ -41,9 +42,11 @@ def load_servers(path: Path) -> list[dict[str, Any]]:
     payload = json.loads(path.read_text(encoding="utf-8"))
     if payload.get("version") != 1:
         raise ValueError("unsupported MCP manifest version")
-    servers = [item for item in payload.get("servers", []) if item.get("category") == "general"]
-    if not servers:
-        raise ValueError("canonical MCP manifest contains no general servers")
+    servers = [
+        item
+        for item in payload.get("servers", [])
+        if item.get("category") == "general" and item.get("runtime", {}).get("mode") != "external"
+    ]
     return servers
 
 
@@ -52,6 +55,8 @@ def command_for(server: dict[str, Any]) -> list[str]:
     source = [expand(str(value)) for value in runtime["command"]]
     if not source or any("\x00" in value for value in source):
         raise ValueError(f"invalid command for {server['name']}")
+    if runtime["mode"] == "external":
+        raise ValueError(f"external MCP must be hosted outside mcp-tools: {server['name']}")
     if runtime["mode"] == "direct":
         return source
     if runtime["mode"] != "supergateway":
@@ -63,7 +68,7 @@ def command_for(server: dict[str, Any]) -> list[str]:
         "--outputTransport",
         "streamableHttp",
         "--port",
-        str(int(server["port"])),
+        str(server_port(server)),
         "--streamableHttpPath",
         "/mcp",
         "--cors",
@@ -71,6 +76,16 @@ def command_for(server: dict[str, Any]) -> list[str]:
         "--logLevel",
         "info",
     ]
+
+
+def server_port(server: dict[str, Any]) -> int:
+    value = server.get("port")
+    if value is not None:
+        return int(value)
+    parsed = urlparse(str(server.get("url", "")))
+    if parsed.port is None:
+        raise ValueError(f"MCP server has no port: {server.get('name', '<unknown>')}")
+    return parsed.port
 
 
 async def emit_output(name: str, stream: asyncio.StreamReader) -> None:
@@ -83,7 +98,7 @@ async def supervise(server: dict[str, Any], stop: asyncio.Event) -> None:
     delay = max(1, int(os.environ.get("MCP_RESTART_DELAY", "5")))
     while not stop.is_set():
         command = command_for(server)
-        log("INFO", "starting MCP server", mcp_server=name, port=server["port"])
+        log("INFO", "starting MCP server", mcp_server=name, port=server_port(server))
         process: asyncio.subprocess.Process | None = None
         try:
             process = await asyncio.create_subprocess_exec(

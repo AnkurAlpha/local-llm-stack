@@ -66,3 +66,35 @@ exact ID afterward.
 `chromadb==1.5.3` is an exact, installable but yanked PyPI release. It remains intentional in V1 to
 match the supplied Chroma 1.5.3 setup and existing on-disk data. Treat its coordinated upgrade as a
 backed-up migration, not an incidental dependency bump.
+# V2 dynamic MCP validation
+
+The following checks exercise the new discovery layer on a Docker-capable host:
+
+```bash
+./llmctl up
+./llmctl mcp status
+./llmctl skills
+./llmctl tools
+```
+
+Expected behavior:
+
+- each configured MCP appears in Agent API discovery;
+- available tools are reported from MCP `tools/list`;
+- one unavailable MCP marks only its capability as degraded;
+- `/v1/chat/completions` initially receives only the compact skill registry and
+  `lmctl_activate_skill`;
+- activating a skill adds only that capability's tool schemas;
+- a chat response includes `lmctl.context` schema-size estimates.
+
+To force a fresh runtime discovery without rebuilding images:
+
+```bash
+./llmctl mcp refresh
+```
+
+The opt-in Chroma persistence test remains:
+
+```bash
+pytest -m live tests/live/test_memory_persistence.py -q
+```

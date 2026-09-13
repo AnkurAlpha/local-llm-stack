@@ -1,0 +1,12 @@
+id: time
+enabled: true
+endpoint: http://mcp-tools:8005/mcp
+transport: streamable-http
+category_hint: time
+description: Get current time and convert time zones.
+runtime:
+  mode: supergateway
+  port: 8005
+  command:
+    - mcp-server-time
+    - --local-timezone=${MCP_TIMEZONE}

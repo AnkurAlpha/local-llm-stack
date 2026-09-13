@@ -1,0 +1,13 @@
+id: sqlite
+enabled: true
+endpoint: http://mcp-tools:8006/mcp
+transport: streamable-http
+category_hint: database
+description: Query and modify the configured SQLite database.
+runtime:
+  mode: supergateway
+  port: 8006
+  command:
+    - mcp-server-sqlite
+    - --db-path
+    - ${MCP_RUNTIME_DIR}/data/test.db

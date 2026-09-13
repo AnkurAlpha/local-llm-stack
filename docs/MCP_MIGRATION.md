@@ -47,12 +47,18 @@ bounded Chroma readiness retry.
 
 ## Canonical configuration
 
-`config/mcp/servers.json` is the single human-edited manifest. It drives:
+`config/mcps/*.yaml` is the human-edited registry. It contains endpoints and
+runtime/category hints, but never tool schemas. The generator produces
+`config/mcp/servers.json`, which drives:
 
 - `mcp-tools` process supervision;
 - Agent API discovery;
 - health/status reporting; and
 - generated `config/mcp/anythingllm_mcp_servers.json`.
+
+V2 also generates the intentionally empty
+`config/mcp/anythingllm_mcp_servers_v2.json`; the Agent API owns progressive
+MCP loading for the default AnythingLLM path.
 
 Regenerate and verify with:
 

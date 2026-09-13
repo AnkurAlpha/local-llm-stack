@@ -1,0 +1,15 @@
+id: chroma-memory
+enabled: true
+endpoint: http://memory-mcp:8011/mcp
+transport: streamable-http
+category_hint: memory
+description: Store, search, update, list, and delete persistent long-term memories.
+scope: memory
+runtime:
+  mode: external
+  service: memory-mcp
+  port: 8011
+storage:
+  service: chroma
+  url: http://chroma:8000
+  host_path: data/memory/chroma

@@ -1,15 +1,58 @@
 {
   "version": 1,
-  "source": "internet.sh + mcp_setup.sh",
+  "source": "config/mcps/*.yaml",
   "servers": [
+    {
+      "name": "chroma-memory",
+      "category": "memory",
+      "category_hint": [
+        "memory"
+      ],
+      "description": "Store, search, update, list, and delete persistent long-term memories.",
+      "transport": "streamable-http",
+      "url": "http://memory-mcp:8011/mcp",
+      "runtime": {
+        "mode": "external",
+        "service": "memory-mcp",
+        "port": 8011
+      },
+      "port": 8011,
+      "storage": {
+        "service": "chroma",
+        "url": "http://chroma:8000",
+        "host_path": "data/memory/chroma"
+      }
+    },
+    {
+      "name": "context7",
+      "category": "general",
+      "category_hint": [
+        "documentation"
+      ],
+      "description": "Retrieve current, library-specific developer documentation.",
+      "transport": "streamable-http",
+      "url": "http://mcp-tools:8007/mcp",
+      "runtime": {
+        "mode": "supergateway",
+        "port": 8007,
+        "command": [
+          "context7-mcp"
+        ]
+      },
+      "port": 8007
+    },
     {
       "name": "duckduckgo",
       "category": "general",
+      "category_hint": [
+        "internet"
+      ],
+      "description": "Search the public internet and retrieve search results.",
       "transport": "streamable-http",
       "url": "http://mcp-tools:8000/mcp",
-      "port": 8000,
       "runtime": {
         "mode": "direct",
+        "port": 8000,
         "command": [
           "duckduckgo-mcp-server",
           "--transport",
@@ -23,77 +66,39 @@
           "127.0.0.1:*",
           "mcp-tools:8000"
         ]
-      }
-    },
-    {
-      "name": "sequential-thinking",
-      "category": "general",
-      "transport": "streamable-http",
-      "source_transport": "stdio",
-      "url": "http://mcp-tools:8003/mcp",
-      "port": 8003,
-      "runtime": {
-        "mode": "supergateway",
-        "command": ["mcp-server-sequential-thinking"]
-      }
+      },
+      "port": 8000
     },
     {
       "name": "fetch",
       "category": "general",
+      "category_hint": [
+        "internet"
+      ],
+      "description": "Fetch and extract readable content from web pages.",
       "transport": "streamable-http",
-      "source_transport": "stdio",
       "url": "http://mcp-tools:8004/mcp",
-      "port": 8004,
       "runtime": {
         "mode": "supergateway",
-        "command": ["mcp-server-fetch"]
-      }
-    },
-    {
-      "name": "time",
-      "category": "general",
-      "transport": "streamable-http",
-      "source_transport": "stdio",
-      "url": "http://mcp-tools:8005/mcp",
-      "port": 8005,
-      "runtime": {
-        "mode": "supergateway",
-        "command": ["mcp-server-time", "--local-timezone=${MCP_TIMEZONE}"]
-      }
-    },
-    {
-      "name": "sqlite",
-      "category": "general",
-      "transport": "streamable-http",
-      "source_transport": "stdio",
-      "url": "http://mcp-tools:8006/mcp",
-      "port": 8006,
-      "runtime": {
-        "mode": "supergateway",
-        "command": ["mcp-server-sqlite", "--db-path", "${MCP_RUNTIME_DIR}/data/test.db"]
-      }
-    },
-    {
-      "name": "context7",
-      "category": "general",
-      "transport": "streamable-http",
-      "source_transport": "stdio",
-      "url": "http://mcp-tools:8007/mcp",
-      "port": 8007,
-      "runtime": {
-        "mode": "supergateway",
-        "command": ["context7-mcp"]
-      }
+        "port": 8004,
+        "command": [
+          "mcp-server-fetch"
+        ]
+      },
+      "port": 8004
     },
     {
       "name": "playwright",
       "category": "general",
+      "category_hint": [
+        "browser"
+      ],
+      "description": "Navigate web pages and interact with a headless Chromium browser.",
       "transport": "streamable-http",
-      "source_transport": "stdio",
       "url": "http://mcp-tools:8931/mcp",
-      "port": 8931,
       "runtime": {
         "mode": "supergateway",
+        "port": 8931,
         "command": [
           "playwright-mcp",
           "--headless",
@@ -105,25 +110,65 @@
           "--output-dir",
           "${MCP_RUNTIME_DIR}/playwright-output"
         ]
-      }
+      },
+      "port": 8931
     },
     {
-      "name": "chroma-memory",
-      "category": "memory",
+      "name": "sequential-thinking",
+      "category": "general",
+      "category_hint": [
+        "reasoning"
+      ],
+      "description": "Break complex problems into explicit sequential reasoning steps.",
       "transport": "streamable-http",
-      "source_transport": "stdio",
-      "url": "http://memory-mcp:8011/mcp",
-      "port": 8011,
+      "url": "http://mcp-tools:8003/mcp",
       "runtime": {
-        "mode": "separate-service",
-        "service": "memory-mcp"
+        "mode": "supergateway",
+        "port": 8003,
+        "command": [
+          "mcp-server-sequential-thinking"
+        ]
       },
-      "storage": {
-        "service": "chroma",
-        "url": "http://chroma:8000",
-        "host_path": "data/memory/chroma"
-      }
+      "port": 8003
+    },
+    {
+      "name": "sqlite",
+      "category": "general",
+      "category_hint": [
+        "database"
+      ],
+      "description": "Query and modify the configured SQLite database.",
+      "transport": "streamable-http",
+      "url": "http://mcp-tools:8006/mcp",
+      "runtime": {
+        "mode": "supergateway",
+        "port": 8006,
+        "command": [
+          "mcp-server-sqlite",
+          "--db-path",
+          "${MCP_RUNTIME_DIR}/data/test.db"
+        ]
+      },
+      "port": 8006
+    },
+    {
+      "name": "time",
+      "category": "general",
+      "category_hint": [
+        "time"
+      ],
+      "description": "Get current time and convert time zones.",
+      "transport": "streamable-http",
+      "url": "http://mcp-tools:8005/mcp",
+      "runtime": {
+        "mode": "supergateway",
+        "port": 8005,
+        "command": [
+          "mcp-server-time",
+          "--local-timezone=${MCP_TIMEZONE}"
+        ]
+      },
+      "port": 8005
     }
   ]
 }
-

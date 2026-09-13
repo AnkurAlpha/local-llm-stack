@@ -1,0 +1,11 @@
+id: sequential-thinking
+enabled: true
+endpoint: http://mcp-tools:8003/mcp
+transport: streamable-http
+category_hint: reasoning
+description: Break complex problems into explicit sequential reasoning steps.
+runtime:
+  mode: supergateway
+  port: 8003
+  command:
+    - mcp-server-sequential-thinking

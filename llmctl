@@ -61,6 +61,7 @@ prepare_runtime() {
     "$ROOT/data/state" \
     "$ROOT/data/anythingllm/plugins" \
     "$ROOT/data/memory/chroma" \
+    "$ROOT/data/mcp" \
     "$ROOT/data/backups"
   python3 "$ROOT/scripts/generate_mcp_configs.py" >/dev/null
 }
@@ -144,6 +145,43 @@ print_row() {
   printf '%-19s %-22s %s\n' "$1" "$2" "$3"
 }
 
+agent_request() {
+  local method="$1" path="$2" port
+  port="$(env_value AGENT_PORT 8000)"
+  python3 - "$method" "$port" "$path" <<'PY'
+import json
+import sys
+import urllib.error
+import urllib.request
+
+method, port, path = sys.argv[1:]
+request = urllib.request.Request(
+    f"http://127.0.0.1:{port}{path}",
+    method=method,
+    headers={"Accept": "application/json"},
+)
+try:
+    with urllib.request.urlopen(request, timeout=10) as response:
+        payload = json.load(response)
+    print(json.dumps(payload, indent=2, ensure_ascii=False))
+except urllib.error.HTTPError as exc:
+    detail = exc.read().decode(errors="replace")
+    print(f"Agent API returned HTTP {exc.code}: {detail}", file=sys.stderr)
+    raise SystemExit(1)
+except (OSError, ValueError) as exc:
+    print(f"Agent API request failed: {type(exc).__name__}", file=sys.stderr)
+    raise SystemExit(1)
+PY
+}
+
+agent_get() {
+  agent_request GET "$1"
+}
+
+agent_post() {
+  agent_request POST "$1"
+}
+
 status() {
   require_docker
   prepare_runtime
@@ -164,7 +202,7 @@ status() {
   fi
   print_row "Agent API" "$(container_state agent-api)" "http://localhost:$(env_value AGENT_PORT 8000)"
   print_row "Model Manager" "$(container_state model-manager)" "$(models_count) completed model(s)"
-  print_row "MCP Tools" "$(container_state mcp-tools)" "7 general MCP servers"
+  print_row "MCP Tools" "$(container_state mcp-tools)" "general MCP supervisor"
   print_row "Memory MCP" "$(container_state memory-mcp)" "collection=$(env_value CHROMA_COLLECTION agent_memory)"
   print_row "Chroma" "$(container_state chroma)" "persistent: data/memory/chroma"
 
@@ -208,17 +246,20 @@ PY
 }
 
 mcp_list() {
+  prepare_runtime
   python3 - "$ROOT/config/mcp/servers.json" <<'PY'
 import json, pathlib, sys
 payload = json.loads(pathlib.Path(sys.argv[1]).read_text())
-print(f"{'NAME':<22} {'GROUP':<9} {'TRANSPORT':<18} ENDPOINT")
+print(f"{'NAME':<22} {'HINT':<18} {'TRANSPORT':<18} ENDPOINT")
 for item in payload['servers']:
-    print(f"{item['name']:<22} {item['category']:<9} {item['transport']:<18} {item['url']}")
+    hints = ','.join(item.get('category_hint', [])) or item.get('category', '')
+    print(f"{item['name']:<22} {hints:<18} {item['transport']:<18} {item['url']}")
 PY
 }
 
 mcp_status() {
   require_docker
+  prepare_runtime
   print_row "MCP Tools" "$(container_state mcp-tools)" ""
   if service_running mcp-tools; then
     dc exec -T mcp-tools python /app/healthcheck.py --json --probe-tools || true
@@ -228,6 +269,30 @@ mcp_status() {
     dc exec -T memory-mcp python /app/healthcheck.py --probe-tools || true
   fi
   print_row "Chroma" "$(container_state chroma)" "persistent"
+  echo
+  echo "Agent MCP discovery:"
+  agent_get /mcp/status || true
+}
+
+skills_list() {
+  prepare_runtime
+  agent_get /mcp/skills
+}
+
+skills_show() {
+  [[ $# -eq 1 ]] || die "Usage: ./llmctl skills show SKILL_ID"
+  [[ "$1" =~ ^[A-Za-z0-9][A-Za-z0-9_-]*$ ]] || die "Invalid skill ID"
+  agent_get "/mcp/skills/$1"
+}
+
+tools_list() {
+  prepare_runtime
+  agent_get /mcp/tools
+}
+
+tools_active() {
+  prepare_runtime
+  agent_get /mcp/tools/active
 }
 
 memory_status() {
@@ -345,7 +410,9 @@ Models:
   remove MODEL [--yes]
 
 MCP:
-  mcp list | status | logs
+  mcp list | status | refresh | logs
+  skills [show SKILL_ID]
+  tools [active]
   memory status | logs | backup | import-volume VOLUME_NAME
 
 Utility:
@@ -373,6 +440,7 @@ main() {
       ;;
     restart)
       require_docker
+      prepare_runtime
       dc restart "$@"
       status
       ;;
@@ -454,9 +522,36 @@ main() {
       case "$subcommand" in
         list) mcp_list ;;
         status) mcp_status ;;
+        refresh)
+          require_docker
+          prepare_runtime
+          agent_post /mcp/refresh
+          ;;
         logs) require_docker; dc logs --tail=200 -f mcp-tools ;;
-        *) die "Usage: ./llmctl mcp list|status|logs" ;;
+        *) die "Usage: ./llmctl mcp list|status|refresh|logs" ;;
       esac
+      ;;
+    skills)
+      require_docker
+      if [[ "${1:-}" == "show" ]]; then
+        shift
+        skills_show "$@"
+      elif [[ $# -eq 0 ]]; then
+        skills_list
+      else
+        die "Usage: ./llmctl skills [show SKILL_ID]"
+      fi
+      ;;
+    tools)
+      require_docker
+      if [[ "${1:-}" == "active" ]]; then
+        [[ $# -eq 1 ]] || die "Usage: ./llmctl tools [active]"
+        tools_active
+      elif [[ $# -eq 0 ]]; then
+        tools_list
+      else
+        die "Usage: ./llmctl tools [active]"
+      fi
       ;;
     memory)
       local subcommand="${1:-status}"

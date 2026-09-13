@@ -11,3 +11,6 @@ class MCPService:
     transport: str
     url: str
     metadata: dict[str, Any]
+    category_hints: tuple[str, ...] = ()
+    description: str = ""
+    enabled: bool = True

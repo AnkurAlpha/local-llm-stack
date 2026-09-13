@@ -1,5 +1,29 @@
 # Architecture and extension boundaries
 
+## V2 dynamic MCP path
+
+The V1 services remain in place. In V2, AnythingLLM points at Agent API's
+OpenAI-compatible `/v1` gateway. Agent API discovers configured MCP endpoints
+from the generated view of `config/mcps/*.yaml`, groups discovered tools into
+capabilities, and initially sends only a compact skill registry to the model.
+The `lmctl_activate_skill` function loads the selected capability's actual
+MCP schemas; those schemas are then used for normal MCP calls.
+
+```mermaid
+flowchart LR
+    YAML[config/mcps/*.yaml] --> Discover[initialize + tools/list]
+    Discover --> Registry[capabilities + skills]
+    Registry --> Gateway[Agent API /v1]
+    Gateway --> LLM[llama.cpp]
+    Gateway --> MCP[MCP endpoints]
+```
+
+`data/mcp/discovery.json` is disposable runtime state. It is rebuilt at start
+up and may be refreshed through `POST /mcp/refresh` or `./llmctl mcp refresh`.
+Manual behavioral skills live in `config/skills/`; their full instructions are
+loaded only after activation. The persistent-memory policy remains manual,
+while its Chroma MCP tools are still discovered normally.
+
 ## Current request paths
 
 AnythingLLM and Agent API both use the stable OpenAI-compatible alias `local-model` at
@@ -58,4 +82,3 @@ to start without a model. `RUNNING` is healthy only when llama.cpp's real `/heal
 
 MCP health checks open every configured service port. Agent API can additionally perform MCP SDK
 initialization and `tools/list`. Chroma uses `/api/v2/heartbeat`. AnythingLLM uses `/api/ping`.
-

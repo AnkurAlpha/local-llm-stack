@@ -16,9 +16,10 @@ class ChatProvider(ABC):
     @abstractmethod
     async def chat(
         self,
-        messages: list[dict[str, str]],
+        messages: list[dict[str, Any]],
         temperature: float | None = None,
         max_tokens: int | None = None,
+        tools: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         raise NotImplementedError
 

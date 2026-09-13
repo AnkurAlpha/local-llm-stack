@@ -77,6 +77,8 @@ services:
     depends_on:
       llama-cpp:
         condition: service_healthy
+      agent-api:
+        condition: service_started
     environment:
       SERVER_PORT: "3001"
       STORAGE_DIR: /app/server/storage
@@ -84,13 +86,13 @@ services:
       GID: ${ANYTHINGLLM_GID:-1000}
       DISABLE_TELEMETRY: ${ANYTHINGLLM_DISABLE_TELEMETRY:-true}
       LLM_PROVIDER: generic-openai
-      GENERIC_OPEN_AI_BASE_PATH: http://llama-cpp:8080/v1
+      GENERIC_OPEN_AI_BASE_PATH: ${ANYTHINGLLM_BASE_PATH:-http://agent-api:8000/v1}
       GENERIC_OPEN_AI_MODEL_PREF: ${ANYTHINGLLM_MODEL_PREF:-local-model}
       GENERIC_OPEN_AI_MODEL_TOKEN_LIMIT: ${LLAMA_CONTEXT_SIZE:-32768}
       GENERIC_OPEN_AI_API_KEY: local-no-key-required
     volumes:
       - ./data/anythingllm:/app/server/storage
-      - ./config/mcp/anythingllm_mcp_servers.json:/app/server/storage/plugins/anythingllm_mcp_servers.json
+      - ${ANYTHINGLLM_MCP_CONFIG_FILE:-./config/mcp/anythingllm_mcp_servers_v2.json}:/app/server/storage/plugins/anythingllm_mcp_servers.json
     ports:
       - 127.0.0.1:${ANYTHINGLLM_PORT:-3001}:3001
     networks: [llm-network]
@@ -124,12 +126,19 @@ services:
       MODELS_ROOT: /models
       STATE_ROOT: /state
       MCP_CONFIG_PATH: /config/mcp/servers.json
+      MCP_SKILLS_PATH: /config/skills
+      MCP_STATE_PATH: /mcp-state/discovery.json
+      MCP_DISCOVERY_TIMEOUT: ${MCP_DISCOVERY_TIMEOUT:-20}
+      MCP_DISCOVERY_RETRIES: ${MCP_DISCOVERY_RETRIES:-3}
+      MCP_DISCOVERY_RETRY_DELAY: ${MCP_DISCOVERY_RETRY_DELAY:-2}
+      DYNAMIC_MAX_STEPS: ${DYNAMIC_MAX_STEPS:-8}
       AGENT_LOG_LEVEL: ${AGENT_LOG_LEVEL:-INFO}
       AGENT_REQUEST_TIMEOUT: ${AGENT_REQUEST_TIMEOUT:-600}
     volumes:
       - ${MODELS_DIR:-./data/models}:/models:ro
       - ./data/state:/state:ro
-      - ./config/mcp:/config/mcp:ro
+      - ./config:/config:ro
+      - ./data/mcp:/mcp-state
     ports:
       - 127.0.0.1:${AGENT_PORT:-8000}:8000
     networks: [llm-network]

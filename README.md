@@ -1,12 +1,12 @@
-# Local LLM Stack — V1
+# Local LLM Stack — V2 (V1-compatible)
 
 A local-first, Docker Compose platform with AnythingLLM, one selectable llama.cpp server, safe
 Hugging Face GGUF downloads, a FastAPI orchestration foundation, the MCP servers recovered from
 `internet.sh`, and persistent Chroma-backed long-term memory.
 
-Prototype V1 serves one selected GGUF model at a time. Model storage, provider interfaces, MCP
-boundaries, and service naming are deliberately structured so later versions can add multiple
-specialized llama.cpp instances without replacing the control plane.
+V2 preserves the working V1 workflow and adds dynamic MCP discovery, capability generation,
+compact model-facing skills, and progressive tool loading. Prototype V2 still serves one selected
+GGUF model at a time. Read [docs/V2_DYNAMIC_MCP.md](docs/V2_DYNAMIC_MCP.md) for the new architecture.
 
 ## V1 status
 
@@ -170,7 +170,7 @@ Use this only after checking the repository and expected size.
 Open [http://localhost:3001](http://localhost:3001). The container receives these safe defaults:
 
 - provider: `generic-openai`
-- base URL: `http://llama-cpp:8080/v1`
+- base URL: `http://agent-api:8000/v1` (the V2 progressive-loading gateway)
 - model: `local-model`
 - token limit: `LLAMA_CONTEXT_SIZE`
 - local placeholder API key: `local-no-key-required`
@@ -180,18 +180,18 @@ adopted by that release, perform this one-time UI step:
 
 1. Open **Settings → AI Providers → LLM**.
 2. Select **Generic OpenAI**.
-3. Enter `http://llama-cpp:8080/v1` as the base URL.
+3. Enter `http://agent-api:8000/v1` as the base URL.
 4. Enter `local-model` as the model and `local-no-key-required` as the key.
 5. Set the token limit to the value of `LLAMA_CONTEXT_SIZE` and save.
 
 Keep AnythingLLM's native embedder unless you deliberately load an embedding-capable model. The
 llama.cpp chat model is not assumed to provide embeddings.
 
-AnythingLLM reads its MCP file from
-`data/anythingllm/plugins/anythingllm_mcp_servers.json`; Compose mounts the generated configuration
-there. The MCP management screen can display server status and available tools. The canonical
-source remains `config/mcp/servers.json`; run `python3 scripts/generate_mcp_configs.py` after an
-intentional manifest change.
+AnythingLLM receives the V2 gateway configuration from
+`data/anythingllm/plugins/anythingllm_mcp_servers_v2.json`, which is intentionally empty so its
+native MCP path does not eagerly load every schema. The V1-compatible direct configuration remains
+available at `config/mcp/anythingllm_mcp_servers.json`. The human-edited source is now
+`config/mcps/*.yaml`; run `python3 scripts/generate_mcp_configs.py` after a registry change.
 
 ## MCP services from the supplied scripts
 
@@ -283,6 +283,14 @@ GET  /models/current
 POST /chat
 GET  /mcp/services
 GET  /mcp/services/{name}/tools
+GET  /mcp/status
+GET  /mcp/discovery
+POST /mcp/refresh
+GET  /mcp/capabilities
+GET  /mcp/skills
+GET  /mcp/tools
+GET  /mcp/tools/active
+POST /v1/chat/completions
 ```
 
 Example:
@@ -304,6 +312,7 @@ data/
 ├── models/                 # owner/repository/*.gguf and resumable partials
 ├── state/                  # models.json, current-model.json, launcher status
 ├── anythingllm/            # AnythingLLM application state
+├── mcp/                    # generated discovery snapshot
 ├── memory/chroma/          # long-term Chroma database
 └── backups/                # explicit Chroma backup archives
 ```

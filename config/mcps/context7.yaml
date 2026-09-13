@@ -1,0 +1,11 @@
+id: context7
+enabled: true
+endpoint: http://mcp-tools:8007/mcp
+transport: streamable-http
+category_hint: documentation
+description: Retrieve current, library-specific developer documentation.
+runtime:
+  mode: supergateway
+  port: 8007
+  command:
+    - context7-mcp
