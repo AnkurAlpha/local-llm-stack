@@ -20,6 +20,11 @@ class Settings:
     mcp_discovery_retries: int = 3
     mcp_discovery_retry_delay: float = 2.0
     dynamic_max_steps: int = 8
+    activity_enabled: bool = True
+    activity_max_events: int = 64
+    activity_history_size: int = 20
+    explanation_enabled: bool = True
+    tool_trace_preview_chars: int = 4000
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -40,4 +45,13 @@ class Settings:
             mcp_discovery_retries=max(0, int(os.getenv("MCP_DISCOVERY_RETRIES", "3"))),
             mcp_discovery_retry_delay=float(os.getenv("MCP_DISCOVERY_RETRY_DELAY", "2")),
             dynamic_max_steps=max(1, int(os.getenv("DYNAMIC_MAX_STEPS", "8"))),
+            activity_enabled=os.getenv("LMCTL_ACTIVITY_ENABLED", "true").lower()
+            not in {"0", "false", "no", "off"},
+            activity_max_events=max(1, int(os.getenv("LMCTL_ACTIVITY_MAX_EVENTS", "64"))),
+            activity_history_size=max(1, int(os.getenv("LMCTL_ACTIVITY_HISTORY_SIZE", "20"))),
+            explanation_enabled=os.getenv("LMCTL_EXPLANATION_ENABLED", "true").lower()
+            not in {"0", "false", "no", "off"},
+            tool_trace_preview_chars=max(
+                128, int(os.getenv("LMCTL_TOOL_TRACE_PREVIEW_CHARS", "4000"))
+            ),
         )

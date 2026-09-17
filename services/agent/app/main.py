@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import time
@@ -15,39 +16,143 @@ from fastapi.responses import StreamingResponse
 from .api_models import ChatRequest, ChatResponse
 from .config import Settings
 from .logconfig import configure_logging
-from .mcp import DynamicOrchestrator, MCPClient, MCPDiscoveryManager, MCPRegistry
+from .mcp import (
+    ActivityStore,
+    ActivityTrace,
+    DynamicOrchestrator,
+    MCPClient,
+    MCPDiscoveryManager,
+    MCPRegistry,
+)
 from .model_registry import LocalModelRegistry
 from .providers import ChatProvider, LlamaCppProvider
+from .providers.errors import provider_error_detail
 
 logger = logging.getLogger(__name__)
 
 
-def _stream_completion(raw: dict[str, Any], model: str) -> StreamingResponse:
-    completion_id = str(raw.get("id") or f"chatcmpl-{uuid.uuid4().hex}")
-    created = int(raw.get("created") or time.time())
-    choices = raw.get("choices") or [{}]
-    message = (choices[0] or {}).get("message") or {}
-    content = message.get("content") or ""
-    finish_reason = (choices[0] or {}).get("finish_reason") or "stop"
+def _sse(payload: Any) -> str:
+    return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
+
+def _openai_chunk(
+    completion_id: str,
+    created: int,
+    model: str,
+    delta: dict[str, Any],
+    finish_reason: str | None = None,
+    **extra: Any,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "id": completion_id,
+        "object": "chat.completion.chunk",
+        "created": created,
+        "model": model,
+        "choices": [{"index": 0, "delta": delta, "finish_reason": finish_reason}],
+    }
+    payload.update(extra)
+    return payload
+
+
+def _stream_dynamic_completion(
+    orchestrator: DynamicOrchestrator,
+    messages: list[dict[str, Any]],
+    temperature: float | None,
+    max_tokens: int | None,
+    request_tools: list[dict[str, Any]],
+    model: str,
+    activity_enabled: bool,
+    activity_max_events: int,
+    activity_store: ActivityStore,
+) -> StreamingResponse:
     async def body() -> AsyncIterator[str]:
-        first = {
-            "id": completion_id,
-            "object": "chat.completion.chunk",
-            "created": created,
-            "model": model,
-            "choices": [{"index": 0, "delta": {"role": "assistant", "content": str(content)}, "finish_reason": None}],
-        }
-        final = {
-            "id": completion_id,
-            "object": "chat.completion.chunk",
-            "created": created,
-            "model": model,
-            "choices": [{"index": 0, "delta": {}, "finish_reason": finish_reason}],
-        }
-        yield f"data: {json.dumps(first, ensure_ascii=False)}\n\n"
-        yield f"data: {json.dumps(final, ensure_ascii=False)}\n\n"
-        yield "data: [DONE]\n\n"
+        completion_id = f"chatcmpl-{uuid.uuid4().hex}"
+        created = int(time.time())
+        events: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+        trace = ActivityTrace(
+            request_id=completion_id,
+            max_events=activity_max_events,
+            enabled=activity_enabled,
+            listener=events.put_nowait,
+        )
+        task = asyncio.create_task(
+            orchestrator.complete(
+                messages,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                request_tools=request_tools,
+                activity=trace,
+            )
+        )
+        try:
+            yield _sse(_openai_chunk(completion_id, created, model, {"role": "assistant"}))
+            while True:
+                if task.done() and events.empty():
+                    break
+                try:
+                    event = await asyncio.wait_for(events.get(), timeout=0.25)
+                except TimeoutError:
+                    continue
+                yield _sse(
+                    _openai_chunk(
+                        completion_id,
+                        created,
+                        model,
+                        {"reasoning_content": f"{event['message']}\n\n"},
+                        lmctl_activity=event,
+                    )
+                )
+
+            try:
+                raw = task.result()
+            except Exception as exc:
+                activity_store.record(trace)
+                logger.exception("dynamic streaming chat failed")
+                yield _sse(
+                    {
+                        "error": {
+                            "message": f"dynamic chat failed: {provider_error_detail(exc)}",
+                            "type": "server_error",
+                        }
+                    }
+                )
+                yield "data: [DONE]\n\n"
+                return
+
+            model_name = str(raw.get("model") or model)
+            choices = raw.get("choices") or [{}]
+            choice = choices[0] or {}
+            message = choice.get("message") or {}
+            content = message.get("content") or ""
+            finish_reason = choice.get("finish_reason") or "stop"
+            activity_store.record(trace)
+            yield _sse(
+                _openai_chunk(
+                    completion_id,
+                    created,
+                    model_name,
+                    {"content": str(content)},
+                    lmctl=raw.get("lmctl"),
+                )
+            )
+            yield _sse(
+                _openai_chunk(
+                    completion_id,
+                    created,
+                    model_name,
+                    {},
+                    finish_reason=finish_reason,
+                    lmctl=raw.get("lmctl"),
+                )
+            )
+            yield "data: [DONE]\n\n"
+        finally:
+            if not task.done():
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
 
     return StreamingResponse(body(), media_type="text/event-stream")
 
@@ -89,7 +194,10 @@ def create_app(
         application.state.orchestrator = DynamicOrchestrator(
             discovery,
             application.state.provider,
-            settings.dynamic_max_steps,
+            max_steps=settings.dynamic_max_steps,
+            activity_max_events=settings.activity_max_events,
+            explanation_enabled=settings.explanation_enabled,
+            tool_trace_preview_chars=settings.tool_trace_preview_chars,
         )
         try:
             yield
@@ -104,6 +212,7 @@ def create_app(
     )
     application.state.provider = supplied_provider
     application.state.discovery = discovery
+    application.state.activity = ActivityStore(settings.activity_history_size)
 
     def get_provider(request: Request) -> ChatProvider:
         active = request.app.state.provider
@@ -170,7 +279,7 @@ def create_app(
         except (httpx.HTTPError, KeyError, IndexError, TypeError) as exc:
             logger.exception("llama.cpp chat request failed")
             raise HTTPException(
-                status_code=502, detail=f"llama.cpp request failed: {exc.__class__.__name__}"
+                status_code=502, detail=f"llama.cpp request failed: {provider_error_detail(exc)}"
             ) from exc
 
     @application.post("/v1/chat/completions")
@@ -191,18 +300,41 @@ def create_app(
         request_tools = payload.get("tools") if isinstance(payload.get("tools"), list) else []
         orchestrator = request.app.state.orchestrator
         try:
-            raw = await orchestrator.complete(
-                [dict(message) for message in messages if isinstance(message, dict)],
-                temperature=payload.get("temperature"),
-                max_tokens=payload.get("max_tokens"),
-                request_tools=request_tools,
+            normalized_messages = [
+                dict(message) for message in messages if isinstance(message, dict)
+            ]
+            if payload.get("stream") is True:
+                return _stream_dynamic_completion(
+                    orchestrator,
+                    normalized_messages,
+                    payload.get("temperature"),
+                    payload.get("max_tokens"),
+                    request_tools,
+                    str(payload.get("model") or settings.llama_model_alias),
+                    settings.activity_enabled,
+                    settings.activity_max_events,
+                    request.app.state.activity,
+                )
+            trace = ActivityTrace(
+                max_events=settings.activity_max_events,
+                enabled=settings.activity_enabled,
             )
+            try:
+                raw = await orchestrator.complete(
+                    normalized_messages,
+                    temperature=payload.get("temperature"),
+                    max_tokens=payload.get("max_tokens"),
+                    request_tools=request_tools,
+                    activity=trace,
+                )
+            finally:
+                request.app.state.activity.record(trace)
         except (httpx.HTTPError, KeyError, IndexError, TypeError, ValueError) as exc:
             logger.exception("dynamic chat request failed")
-            raise HTTPException(status_code=502, detail=f"dynamic chat failed: {type(exc).__name__}") from exc
+            raise HTTPException(
+                status_code=502, detail=f"dynamic chat failed: {provider_error_detail(exc)}"
+            ) from exc
         model = str(raw.get("model", settings.llama_model_alias))
-        if payload.get("stream") is True:
-            return _stream_completion(raw, model)
         return raw
 
     @application.get("/mcp/services")
@@ -291,6 +423,16 @@ def create_app(
     async def active_tools(manager: MCPDiscoveryManager = Depends(get_discovery)) -> dict[str, Any]:  # noqa: B008
         tools = manager.active_tools(include_schema=True)
         return {"tools": tools, "metrics": manager.metrics(tools)}
+
+    @application.get("/mcp/activity")
+    async def mcp_activity(request: Request) -> dict[str, Any]:
+        return {
+            "enabled": settings.activity_enabled,
+            "explanation_enabled": settings.explanation_enabled,
+            "tool_trace_preview_chars": settings.tool_trace_preview_chars,
+            "latest": request.app.state.activity.latest(),
+            "runs": request.app.state.activity.list(),
+        }
 
     return application
 
