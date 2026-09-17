@@ -71,7 +71,7 @@ class DynamicOrchestrator:
         redacted = self._redact_trace_value(value)
         try:
             rendered = json.dumps(redacted, ensure_ascii=False, indent=2, default=str)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             rendered = json.dumps({"value": str(redacted)}, ensure_ascii=False, indent=2)
         if len(rendered) <= self.tool_trace_preview_chars:
             return rendered, False
@@ -354,9 +354,7 @@ class DynamicOrchestrator:
                         result_preview, result_truncated = self._trace_json(result)
                         result_format = "json" if not result_truncated else "text"
                         error_name = type(tool_exception).__name__ if tool_exception else None
-                        error_detail = (
-                            self._trace_error_detail(tool_exception) if tool_exception else None
-                        )
+                        error_detail = self._trace_error_detail(tool_exception) if tool_exception else None
                         status = (
                             f"call raised {error_name}"
                             if error_name
@@ -365,9 +363,7 @@ class DynamicOrchestrator:
                             else "completed"
                         )
                         error_lines = (
-                            f"**Error:** `{error_name}`\n**Detail:** {error_detail}\n"
-                            if error_name
-                            else ""
+                            f"**Error:** `{error_name}`\n**Detail:** {error_detail}\n" if error_name else ""
                         )
                         trace.emit(
                             "tool_call_failed" if tool_error else "tool_call_completed",

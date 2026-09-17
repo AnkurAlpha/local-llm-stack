@@ -110,8 +110,6 @@ class SkillCatalog:
         for item in skills:
             providers = ", ".join(item["providers"]) or "behavior instructions"
             state = "available" if item["available"] else "partially unavailable"
-            lines.append(
-                f"- {item['id']}: {item['description']} Providers: {providers}. Status: {state}."
-            )
+            lines.append(f"- {item['id']}: {item['description']} Providers: {providers}. Status: {state}.")
         lines.append("Do not invent MCP tool names. Load the relevant skill when needed.")
         return "\n".join(lines)

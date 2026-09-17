@@ -183,16 +183,11 @@ class MCPDiscoveryManager:
         for record in self.records.values():
             if not record.healthy or capability_id not in infer_hints(record.service, record.tools):
                 continue
-            definitions.extend(
-                openai_tool_definition(record.service.name, tool) for tool in record.tools
-            )
+            definitions.extend(openai_tool_definition(record.service.name, tool) for tool in record.tools)
         return definitions
 
     def all_openai_tools(self) -> list[dict[str, Any]]:
-        return [
-            openai_tool_definition(provider, tool)
-            for provider, tool in self._tool_index.values()
-        ]
+        return [openai_tool_definition(provider, tool) for provider, tool in self._tool_index.values()]
 
     def lookup_tool(self, function_name: str) -> tuple[Any, dict[str, Any]]:
         provider, tool = self._tool_index[function_name]

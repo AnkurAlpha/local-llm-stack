@@ -250,7 +250,7 @@ def create_app(
     async def openai_models(active: ChatProvider = Depends(get_provider)) -> dict[str, Any]:  # noqa: B008
         try:
             data = await active.models()
-        except (httpx.HTTPError, ValueError, KeyError, TypeError):
+        except httpx.HTTPError, ValueError, KeyError, TypeError:
             data = []
         if not data:
             data = [{"id": settings.llama_model_alias, "object": "model", "owned_by": "lmctl"}]
@@ -300,9 +300,7 @@ def create_app(
         request_tools = payload.get("tools") if isinstance(payload.get("tools"), list) else []
         orchestrator = request.app.state.orchestrator
         try:
-            normalized_messages = [
-                dict(message) for message in messages if isinstance(message, dict)
-            ]
+            normalized_messages = [dict(message) for message in messages if isinstance(message, dict)]
             if payload.get("stream") is True:
                 return _stream_dynamic_completion(
                     orchestrator,
@@ -334,7 +332,6 @@ def create_app(
             raise HTTPException(
                 status_code=502, detail=f"dynamic chat failed: {provider_error_detail(exc)}"
             ) from exc
-        model = str(raw.get("model", settings.llama_model_alias))
         return raw
 
     @application.get("/mcp/services")

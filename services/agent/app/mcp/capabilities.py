@@ -3,8 +3,9 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass, field
-from typing import Any, Iterable
+from typing import Any
 
 from .models import MCPService
 
@@ -118,9 +119,7 @@ def capability_payload(records: Iterable[ServerRecord]) -> dict[str, dict[str, A
             if record.healthy and record.tools:
                 entry["available"] = True
             if record.error:
-                entry["errors"].append(
-                    {"provider": record.service.name, "error": record.error}
-                )
+                entry["errors"].append({"provider": record.service.name, "error": record.error})
             for tool in record.tools:
                 entry["tools"].append(
                     {

@@ -37,7 +37,7 @@ class Settings:
             models_root=Path(os.getenv("MODELS_ROOT", "/models")),
             state_root=Path(os.getenv("STATE_ROOT", "/state")),
             mcp_config_path=Path(os.getenv("MCP_CONFIG_PATH", "/config/mcp/servers.json")),
-            request_timeout=float(os.getenv("AGENT_REQUEST_TIMEOUT", "600")),
+            request_timeout=float(os.getenv("AGENT_REQUEST_TIMEOUT", "14400")),
             log_level=os.getenv("AGENT_LOG_LEVEL", "INFO").upper(),
             skills_path=Path(os.getenv("MCP_SKILLS_PATH", "/config/skills")),
             mcp_state_path=Path(os.getenv("MCP_STATE_PATH", "/mcp-state/discovery.json")),
@@ -51,7 +51,5 @@ class Settings:
             activity_history_size=max(1, int(os.getenv("LMCTL_ACTIVITY_HISTORY_SIZE", "20"))),
             explanation_enabled=os.getenv("LMCTL_EXPLANATION_ENABLED", "true").lower()
             not in {"0", "false", "no", "off"},
-            tool_trace_preview_chars=max(
-                128, int(os.getenv("LMCTL_TOOL_TRACE_PREVIEW_CHARS", "4000"))
-            ),
+            tool_trace_preview_chars=max(128, int(os.getenv("LMCTL_TOOL_TRACE_PREVIEW_CHARS", "4000"))),
         )

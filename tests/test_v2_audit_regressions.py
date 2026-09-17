@@ -90,9 +90,7 @@ def test_step_limit_gives_visible_incomplete_answer_without_pending_calls(tmp_pa
     config = replace(dynamic_settings(tmp_path), dynamic_max_steps=1)
     select_model(config)
     provider = ToolProvider()
-    with TestClient(
-        create_app(provider=provider, settings=config, mcp_client=FakeMCPClient())
-    ) as client:
+    with TestClient(create_app(provider=provider, settings=config, mcp_client=FakeMCPClient())) as client:
         response = client.post(
             "/v1/chat/completions",
             json={"stream": stream, "messages": [{"role": "user", "content": "search hello"}]},
@@ -101,8 +99,7 @@ def test_step_limit_gives_visible_incomplete_answer_without_pending_calls(tmp_pa
         if stream:
             chunks = _sse_chunks(response.text)
             content = "".join(
-                chunk["choices"][0]["delta"].get("content", "")
-                for chunk in chunks if chunk.get("choices")
+                chunk["choices"][0]["delta"].get("content", "") for chunk in chunks if chunk.get("choices")
             )
         else:
             message = response.json()["choices"][0]["message"]
@@ -120,10 +117,14 @@ def test_exhausted_token_budget_does_not_produce_a_blank_answer(tmp_path, stream
 
     class EmptyProvider(ToolProvider):
         async def chat(self, messages, **kwargs):
-            return {"choices": [{
-                "message": {"role": "assistant", "content": "", "reasoning_content": "unfinished"},
-                "finish_reason": "length",
-            }]}
+            return {
+                "choices": [
+                    {
+                        "message": {"role": "assistant", "content": "", "reasoning_content": "unfinished"},
+                        "finish_reason": "length",
+                    }
+                ]
+            }
 
     with TestClient(
         create_app(provider=EmptyProvider(), settings=config, mcp_client=FakeMCPClient())
@@ -139,9 +140,15 @@ def test_exhausted_token_budget_does_not_produce_a_blank_answer(tmp_path, stream
 
 def test_http_diagnostic_limits_and_redacts_message_and_ignores_raw_body():
     request = httpx.Request("POST", "http://llama-cpp:8080/v1/chat/completions")
-    response = httpx.Response(401, request=request, json={"error": {
-        "message": "Invalid api_key=super-secret Bearer hidden-auth " + "x" * 2000,
-    }})
+    response = httpx.Response(
+        401,
+        request=request,
+        json={
+            "error": {
+                "message": "Invalid api_key=super-secret Bearer hidden-auth " + "x" * 2000,
+            }
+        },
+    )
     detail = provider_error_detail(httpx.HTTPStatusError("failed", request=request, response=response))
     assert "HTTP 401" in detail
     assert "super-secret" not in detail and "hidden-auth" not in detail

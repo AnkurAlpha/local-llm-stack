@@ -8,7 +8,7 @@ from .base import ChatProvider
 
 
 class LlamaCppProvider(ChatProvider):
-    def __init__(self, base_url: str, model: str, timeout: float = 600) -> None:
+    def __init__(self, base_url: str, model: str, timeout: float = 14400) -> None:
         self.base_url = base_url.rstrip("/")
         self.server_url = self.base_url.removesuffix("/v1")
         self.model = model

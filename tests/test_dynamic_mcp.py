@@ -128,9 +128,7 @@ def test_discovery_failure_isolated_and_tool_schemas_are_progressive(tmp_path: P
     config = dynamic_settings(tmp_path)
     select_model(config)
     provider = ToolProvider()
-    with TestClient(
-        create_app(provider=provider, settings=config, mcp_client=FakeMCPClient())
-    ) as client:
+    with TestClient(create_app(provider=provider, settings=config, mcp_client=FakeMCPClient())) as client:
         status = client.get("/mcp/status").json()
         assert status["status"] == "degraded"
         assert {item["name"] for item in status["servers"]} == {"search-provider", "broken"}
@@ -168,9 +166,7 @@ def test_stream_exposes_activity_without_loading_unrelated_schemas(tmp_path: Pat
     config = dynamic_settings(tmp_path)
     select_model(config)
     provider = ToolProvider()
-    with TestClient(
-        create_app(provider=provider, settings=config, mcp_client=FakeMCPClient())
-    ) as client:
+    with TestClient(create_app(provider=provider, settings=config, mcp_client=FakeMCPClient())) as client:
         response = client.post(
             "/v1/chat/completions",
             json={
@@ -180,11 +176,7 @@ def test_stream_exposes_activity_without_loading_unrelated_schemas(tmp_path: Pat
         )
         assert response.status_code == 200
         chunks = _sse_chunks(response.text)
-        activity = [
-            chunk["lmctl_activity"]
-            for chunk in chunks
-            if "lmctl_activity" in chunk
-        ]
+        activity = [chunk["lmctl_activity"] for chunk in chunks if "lmctl_activity" in chunk]
         messages = [item["message"] for item in activity]
         assert any("Activated skill: internet" in message for message in messages)
         assert any("Loaded tools: search-provider.search" in message for message in messages)
@@ -192,9 +184,7 @@ def test_stream_exposes_activity_without_loading_unrelated_schemas(tmp_path: Pat
         assert any("Tool completed: search-provider.search" in message for message in messages)
         assert any("Generating final response" in message for message in messages)
         content = "".join(
-            chunk["choices"][0]["delta"].get("content", "")
-            for chunk in chunks
-            if chunk.get("choices")
+            chunk["choices"][0]["delta"].get("content", "") for chunk in chunks if chunk.get("choices")
         )
         assert content == "done"
 
