@@ -295,6 +295,11 @@ tools_active() {
   agent_get /mcp/tools/active
 }
 
+activity_show() {
+  require_docker
+  agent_get /mcp/activity
+}
+
 memory_status() {
   require_docker
   print_row "Memory MCP" "$(container_state memory-mcp)" "http://memory-mcp:$(env_value MEMORY_MCP_PORT 8011)/mcp"
@@ -417,6 +422,7 @@ MCP:
 
 Utility:
   shell SERVICE
+  activity
 EOF
 }
 
@@ -552,6 +558,9 @@ main() {
       else
         die "Usage: ./llmctl tools [active]"
       fi
+      ;;
+    activity)
+      activity_show
       ;;
     memory)
       local subcommand="${1:-status}"

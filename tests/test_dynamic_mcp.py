@@ -142,7 +142,65 @@ def test_discovery_failure_isolated_and_tool_schemas_are_progressive(tmp_path: P
             json={"messages": [{"role": "user", "content": "search hello"}]},
         )
         assert response.status_code == 200
-        assert response.json()["choices"][0]["message"]["content"] == "done"
+        payload = response.json()
+        assert payload["choices"][0]["message"]["content"] == "done"
+        activity = payload["lmctl"]["activity"]
+        assert any(item["event"] == "skill_activated" for item in activity)
+        assert any(item["event"] == "tool_call_completed" for item in activity)
+
+    assert provider.tool_lists[0] == ["lmctl_activate_skill"]
+    assert "mcp__search-provider__search" in provider.tool_lists[1]
+    assert all("mcp__broken" not in name for name in provider.tool_lists[1])
+
+
+def _sse_chunks(text: str) -> list[dict[str, Any]]:
+    chunks: list[dict[str, Any]] = []
+    for line in text.splitlines():
+        if not line.startswith("data: "):
+            continue
+        value = line.removeprefix("data: ")
+        if value != "[DONE]":
+            chunks.append(json.loads(value))
+    return chunks
+
+
+def test_stream_exposes_activity_without_loading_unrelated_schemas(tmp_path: Path) -> None:
+    config = dynamic_settings(tmp_path)
+    select_model(config)
+    provider = ToolProvider()
+    with TestClient(
+        create_app(provider=provider, settings=config, mcp_client=FakeMCPClient())
+    ) as client:
+        response = client.post(
+            "/v1/chat/completions",
+            json={
+                "stream": True,
+                "messages": [{"role": "user", "content": "search hello"}],
+            },
+        )
+        assert response.status_code == 200
+        chunks = _sse_chunks(response.text)
+        activity = [
+            chunk["lmctl_activity"]
+            for chunk in chunks
+            if "lmctl_activity" in chunk
+        ]
+        messages = [item["message"] for item in activity]
+        assert any("Activated skill: internet" in message for message in messages)
+        assert any("Loaded tools: search-provider.search" in message for message in messages)
+        assert any("Calling tool: search-provider.search" in message for message in messages)
+        assert any("Tool completed: search-provider.search" in message for message in messages)
+        assert any("Generating final response" in message for message in messages)
+        content = "".join(
+            chunk["choices"][0]["delta"].get("content", "")
+            for chunk in chunks
+            if chunk.get("choices")
+        )
+        assert content == "done"
+
+        latest = client.get("/mcp/activity").json()["latest"]
+        assert latest["request_id"] == chunks[0]["id"]
+        assert len(latest["events"]) == len(activity)
 
     assert provider.tool_lists[0] == ["lmctl_activate_skill"]
     assert "mcp__search-provider__search" in provider.tool_lists[1]

@@ -5,8 +5,9 @@ Hugging Face GGUF downloads, a FastAPI orchestration foundation, the MCP servers
 `internet.sh`, and persistent Chroma-backed long-term memory.
 
 V2 preserves the working V1 workflow and adds dynamic MCP discovery, capability generation,
-compact model-facing skills, and progressive tool loading. Prototype V2 still serves one selected
-GGUF model at a time. Read [docs/V2_DYNAMIC_MCP.md](docs/V2_DYNAMIC_MCP.md) for the new architecture.
+compact model-facing skills, progressive tool loading, and an activity stream. Prototype V2 still
+serves one selected GGUF model at a time. Read [docs/V2_DYNAMIC_MCP.md](docs/V2_DYNAMIC_MCP.md)
+and [docs/V2_ACTIVITY_STREAM.md](docs/V2_ACTIVITY_STREAM.md) for the new architecture.
 
 ## V1 status
 
@@ -192,6 +193,12 @@ AnythingLLM receives the V2 gateway configuration from
 native MCP path does not eagerly load every schema. The V1-compatible direct configuration remains
 available at `config/mcp/anythingllm_mcp_servers.json`. The human-edited source is now
 `config/mcps/*.yaml`; run `python3 scripts/generate_mcp_configs.py` after a registry change.
+
+When streaming is enabled, the Agent API sends safe LMCTL activity events to
+AnythingLLM's collapsible activity/thought area. Inspect the latest trace from
+the terminal with `./llmctl activity`. See
+[docs/V2_ACTIVITY_STREAM.md](docs/V2_ACTIVITY_STREAM.md) for the event format
+and troubleshooting steps.
 
 ## MCP services from the supplied scripts
 

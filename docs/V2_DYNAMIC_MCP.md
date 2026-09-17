@@ -49,6 +49,12 @@ The Agent API executes the MCP call, returns its result to the model, and
 continues the normal tool loop. The response includes an `lmctl` diagnostic
 object with active skills, loaded tools, and approximate schema sizes.
 
+The streaming gateway also emits a bounded activity trace containing skill
+activation, loaded tools, actual MCP calls, completion/failure, and final
+response-generation events. See
+[V2_ACTIVITY_STREAM.md](V2_ACTIVITY_STREAM.md). This trace describes agent
+operations and does not expose private model chain-of-thought.
+
 ## Adding an MCP
 
 For an MCP inside the existing `mcp-tools` container:
@@ -103,6 +109,7 @@ With the stack running:
 ./llmctl skills show internet
 ./llmctl tools
 ./llmctl tools active
+./llmctl activity
 ```
 
 The same information is available from the Agent API:
@@ -115,6 +122,7 @@ GET  /mcp/capabilities
 GET  /mcp/skills
 GET  /mcp/tools
 GET  /mcp/tools/active
+GET  /mcp/activity
 ```
 
 Compare `all_tool_schema_approx_tokens` with
